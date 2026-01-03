@@ -41,35 +41,39 @@
         <p id="message" class="mt-4 text-sm font-semibold hidden"></p>
     </div>
 
+    
+
     <script>
         // ---------------------------------------------------------
-        // 1. CONFIGURACIÓN (Pegar claves del .env aquí)
+        // 1. CONFIGURACIÓN (Asegúrate de pegar tus claves reales aquí)
         // ---------------------------------------------------------
         const supabaseUrl = 'https://mmvbwiozwwvvmyhpepdk.supabase.co'; 
         const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1tdmJ3aW96d3d2dm15aHBlcGRrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4OTk5MTUsImV4cCI6MjA4MTQ3NTkxNX0.dvuJVNE_8SgfkD3pt-I--yDk2yyxo5UIyuxBQIINi6I';
 
-
-        // 2. Inicialización forzando IMPLICIT FLOW
-        const supabase = supabase.createClient(supabaseUrl, supabaseKey, {
+        // ---------------------------------------------------------
+        // 2. CORRECCIÓN DEL ERROR
+        // Usamos 'supabaseClient' en lugar de 'supabase' para no chocar 
+        // con el nombre de la librería global.
+        // ---------------------------------------------------------
+        const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey, {
             auth: {
-                flowType: 'implicit', // <--- ESTO ES VITAL para evitar PKCE
-                detectSessionInUrl: true, // Deja que Supabase lea el #access_token
+                flowType: 'implicit', 
+                detectSessionInUrl: true, 
             }
         });
 
         // 3. Detectar si el usuario llegó con un token válido
-        supabase.auth.onAuthStateChange(async (event, session) => {
+        // Nota: Ahora usamos 'supabaseClient' en lugar de 'supabase'
+        supabaseClient.auth.onAuthStateChange(async (event, session) => {
             const loader = document.getElementById('loading-msg');
             const form = document.getElementById('form-container');
             const msg = document.getElementById('message');
 
             if (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
-                // ¡Éxito! El token del URL era válido y ya tenemos sesión activa
                 loader.style.display = 'none';
-                form.style.display = 'block'; // Mostramos el formulario
-                console.log("Sesión recuperada vía Implicit Flow");
+                form.style.display = 'block'; 
+                console.log("Sesión recuperada correctamente");
             } else if (event === 'SIGNED_OUT') {
-                // Si no hay sesión y tampoco hay hash en la URL, es un error
                 if (!window.location.hash || !window.location.hash.includes('access_token')) {
                     loader.style.display = 'none';
                     msg.innerText = "Enlace inválido o expirado.";
@@ -93,9 +97,8 @@
             btn.disabled = true;
             btn.innerText = "Actualizando...";
 
-            // Como ya tenemos sesión activa (gracias al onAuthStateChange), 
-            // updateUser sabe a quién cambiarle la clave.
-            const { data, error } = await supabase.auth.updateUser({
+            // Usamos supabaseClient aquí también
+            const { data, error } = await supabaseClient.auth.updateUser({
                 password: password
             });
 
@@ -111,8 +114,8 @@
                 msg.classList.add('text-green-600');
                 document.getElementById('form-container').style.display = 'none';
                 
-                // Opcional: Cerrar sesión después de cambiar para seguridad
-                await supabase.auth.signOut();
+                // Cerrar sesión por seguridad
+                await supabaseClient.auth.signOut();
             }
         }
     </script>
