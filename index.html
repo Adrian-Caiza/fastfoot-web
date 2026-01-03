@@ -12,7 +12,7 @@
         .btn-hover:hover { background-color: #E64A19; }
     </style>
 </head>
-<body class="bg-gray-100 flex items-center justify-center h-screen">
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
 
     <div class="bg-white p-8 rounded-lg shadow-lg max-w-md w-full text-center">
         <div class="mb-6 flex justify-center">
@@ -24,13 +24,16 @@
         </div>
 
         <h2 class="text-2xl font-bold mb-2 text-gray-800">Nueva Contraseña</h2>
-        <p class="text-gray-500 mb-6 text-sm">Ingresa tu nueva contraseña para recuperar el acceso a FastFoot.</p>
-
-        <div id="loading-msg" class="text-gray-500 mb-4">Verificando enlace...</div>
+        
+        <div id="loading-section">
+            <p class="text-gray-500 mb-6 text-sm">Procesando enlace de seguridad...</p>
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto"></div>
+        </div>
 
         <div id="form-container" class="hidden">
+            <p class="text-gray-500 mb-6 text-sm">Ingresa tu nueva contraseña.</p>
             <input type="password" id="password" placeholder="Nueva contraseña (min 6 caracteres)" 
-                    class="w-full p-3 border border-gray-300 rounded mb-4 focus:outline-none focus:border-orange-500 transition">
+                   class="w-full p-3 border border-gray-300 rounded mb-4 focus:outline-none focus:border-orange-500 transition">
             
             <button onclick="updatePassword()" id="submitBtn"
                     class="w-full bg-brand text-white p-3 rounded font-bold btn-hover transition duration-200">
@@ -41,75 +44,107 @@
         <p id="message" class="mt-4 text-sm font-semibold hidden"></p>
     </div>
 
-    
+    <div class="mt-8 p-4 bg-gray-200 rounded text-xs text-left w-full max-w-md font-mono break-all border border-gray-400">
+        <strong>DEBUG LOG:</strong>
+        <div id="debug-log" class="mt-1 text-gray-700">Iniciando script...</div>
+    </div>
 
     <script>
-        // 1. CONFIGURACIÓN
+        // --- 1. CONFIGURACIÓN ---
         const supabaseUrl = 'https://mmvbwiozwwvvmyhpepdk.supabase.co'; 
         const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1tdmJ3aW96d3d2dm15aHBlcGRrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4OTk5MTUsImV4cCI6MjA4MTQ3NTkxNX0.dvuJVNE_8SgfkD3pt-I--yDk2yyxo5UIyuxBQIINi6I';
 
 
-        // 2. CLIENTE "AUTOMÁTICO"
-        // Quitamos la restricción de 'implicit' para que detecte AUTOMÁTICAMENTE
-        // si el link trae un ?code= (PKCE) o un #access_token= (Implícito).
-        const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey, {
-            auth: {
-                detectSessionInUrl: true, 
-            }
-        });
+        // Función para escribir en la caja gris de abajo
+        function log(text) {
+            const el = document.getElementById('debug-log');
+            el.innerHTML += `<br/>> ${text}`;
+            console.log(text);
+        }
 
-        // Referencias al DOM
-        const loader = document.getElementById('loading-msg');
+        // --- 2. INICIALIZAR CLIENTE ---
+        const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+        
+        log("Cliente Supabase inicializado.");
+
+        // Referencias UI
+        const loader = document.getElementById('loading-section');
         const form = document.getElementById('form-container');
         const msg = document.getElementById('message');
 
-        // 3. ESCUCHA DE EVENTOS ROBUSTA
-        supabaseClient.auth.onAuthStateChange(async (event, session) => {
-            console.log("Evento Supabase:", event);
-
-            if (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
-                // CASO 1: ÉXITO - Tenemos sesión (vía Token o Código intercambiado)
-                loader.style.display = 'none';
-                form.style.display = 'block'; 
-            } 
-            else if (event === 'INITIAL_SESSION') {
-                // CASO 2: CARGA INICIAL
-                // Si al cargar la página ya hay sesión, mostramos el formulario.
-                if (session) {
-                    loader.style.display = 'none';
-                    form.style.display = 'block';
-                } else {
-                    // Si NO hay sesión, verificamos si hay algo en la URL pendiente de procesar.
-                    // Si la URL está limpia, es que el enlace no sirvió o el usuario entró directo.
-                    const urlHasCode = window.location.search.includes('code=');
-                    const urlHasToken = window.location.hash.includes('access_token');
-                    
-                    if (!urlHasCode && !urlHasToken) {
-                        loader.style.display = 'none';
-                        msg.innerText = "Enlace no válido o expirado.";
-                        msg.classList.remove('hidden');
-                        msg.classList.add('text-red-500');
-                    }
-                    // Si hay code/token pero no hay sesión aún, esperamos (Supabase está procesando...)
-                }
+        // --- 3. LÓGICA MANUAL DE DETECCIÓN ---
+        async function handleSession() {
+            // A. Revisar si hay sesión activa (Ej. recarga de página)
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session) {
+                log("Sesión detectada automáticamente.");
+                showForm();
+                return;
             }
-            else if (event === 'SIGNED_OUT') {
-                // CASO 3: CIERRE DE SESIÓN
-                // Solo mostramos error si el loader seguía activo
-                if (loader.style.display !== 'none') {
-                    loader.style.display = 'none';
-                    msg.innerText = "Sesión cerrada o enlace inválido.";
-                    msg.classList.remove('hidden');
-                    msg.classList.add('text-red-500');
+
+            // B. Revisar la URL manualmente
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code'); // Para flujo PKCE
+            const hash = window.location.hash;  // Para flujo Implícito
+
+            log(`URL Check -> Code: ${code ? 'SÍ' : 'NO'} | Hash: ${hash ? 'SÍ' : 'NO'}`);
+
+            if (code) {
+                log("Código encontrado. Intentando intercambiar...");
+                try {
+                    const { data, error } = await supabaseClient.auth.exchangeCodeForSession(code);
+                    if (error) throw error;
+                    log("¡Intercambio exitoso! Sesión creada.");
+                    showForm();
+                } catch (err) {
+                    log("Error intercambiando código: " + err.message);
+                    showError("El enlace ha expirado o es inválido.");
                 }
+            } 
+            else if (hash && hash.includes('access_token')) {
+                log("Token encontrado en Hash. Supabase debería procesarlo...");
+                // Damos un pequeño respiro para que el onAuthStateChange lo capture
+                setTimeout(() => {
+                    // Si después de 2 segundos no se mostró el form, forzamos error
+                    if (form.classList.contains('hidden')) {
+                        log("Supabase no procesó el Hash.");
+                        showError("No se pudo procesar el token.");
+                    }
+                }, 2000);
+            } 
+            else {
+                log("No se encontró nada en la URL.");
+                showError("Enlace inválido. Intenta solicitar uno nuevo.");
+            }
+        }
+
+        // --- 4. LISTENER DE RESPALDO ---
+        supabaseClient.auth.onAuthStateChange((event, session) => {
+            log(`Evento Auth disparado: ${event}`);
+            if (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
+                showForm();
             }
         });
 
-        // 4. FUNCIÓN ACTUALIZAR (Sin cambios)
+        // --- FUNCIONES UI ---
+        function showForm() {
+            log("Mostrando formulario.");
+            loader.style.display = 'none';
+            form.style.display = 'block';
+            form.classList.remove('hidden'); // Asegurar visibilidad
+        }
+
+        function showError(text) {
+            loader.style.display = 'none';
+            msg.innerText = text;
+            msg.classList.remove('hidden');
+            msg.classList.add('text-red-500');
+        }
+
+        // --- 5. LÓGICA DE ACTUALIZACIÓN ---
         async function updatePassword() {
             const password = document.getElementById('password').value;
             const btn = document.getElementById('submitBtn');
-            const msg = document.getElementById('message');
 
             if (password.length < 6) {
                 alert("La contraseña debe tener al menos 6 caracteres");
@@ -117,26 +152,34 @@
             }
 
             btn.disabled = true;
-            btn.innerText = "Actualizando...";
+            btn.innerText = "Enviando...";
+            log("Enviando nueva contraseña...");
 
             const { data, error } = await supabaseClient.auth.updateUser({
                 password: password
             });
 
-            msg.classList.remove('hidden');
-
             if (error) {
+                log("Error al actualizar: " + error.message);
                 msg.innerText = "Error: " + error.message;
+                msg.classList.remove('hidden');
                 msg.classList.add('text-red-500');
                 btn.disabled = false;
                 btn.innerText = "CAMBIAR CONTRASEÑA";
             } else {
+                log("Contraseña actualizada con éxito.");
                 msg.innerText = "¡Contraseña actualizada! Ya puedes volver a la App.";
+                msg.classList.remove('hidden');
+                msg.classList.remove('text-red-500');
                 msg.classList.add('text-green-600');
                 document.getElementById('form-container').style.display = 'none';
                 await supabaseClient.auth.signOut();
             }
         }
+
+        // EJECUTAR AL INICIO
+        handleSession();
+
     </script>
 </body>
 </html>
