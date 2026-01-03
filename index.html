@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Restablecer Contraseña - FastFoot</title>
+    <title>FastFoot - Seguridad</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <style>
@@ -23,15 +23,15 @@
             </div>
         </div>
 
-        <h2 class="text-2xl font-bold mb-2 text-gray-800">Nueva Contraseña</h2>
-        
         <div id="loading-section">
-            <p class="text-gray-500 mb-6 text-sm">Verificando seguridad...</p>
+            <p class="text-gray-500 mb-6 text-sm">Procesando solicitud...</p>
             <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto"></div>
         </div>
 
-        <div id="form-container" class="hidden">
-            <p class="text-gray-500 mb-6 text-sm">Ingresa tu nueva contraseña para recuperar el acceso.</p>
+        <div id="recovery-container" class="hidden">
+            <h2 class="text-2xl font-bold mb-2 text-gray-800">Nueva Contraseña</h2>
+            <p class="text-gray-500 mb-6 text-sm">Crea una nueva contraseña para tu cuenta.</p>
+            
             <input type="password" id="password" placeholder="Nueva contraseña (min 6 caracteres)" 
                    class="w-full p-3 border border-gray-300 rounded mb-4 focus:outline-none focus:border-orange-500 transition">
             
@@ -39,6 +39,17 @@
                     class="w-full bg-brand text-white p-3 rounded font-bold btn-hover transition duration-200">
                 CAMBIAR CONTRASEÑA
             </button>
+        </div>
+
+        <div id="verified-container" class="hidden">
+            <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-4">
+                <svg class="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+            </div>
+            <h2 class="text-2xl font-bold mb-2 text-gray-800">¡Email Verificado!</h2>
+            <p class="text-gray-500 mb-6 text-sm">Tu cuenta ha sido confirmada correctamente.</p>
+            <p class="text-orange-600 font-semibold">Ya puedes cerrar esta ventana e iniciar sesión en la App.</p>
         </div>
 
         <p id="message" class="mt-4 text-sm font-semibold hidden"></p>
@@ -49,76 +60,63 @@
         const supabaseUrl = 'https://mmvbwiozwwvvmyhpepdk.supabase.co'; 
         const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1tdmJ3aW96d3d2dm15aHBlcGRrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4OTk5MTUsImV4cCI6MjA4MTQ3NTkxNX0.dvuJVNE_8SgfkD3pt-I--yDk2yyxo5UIyuxBQIINi6I';
 
-        // Inicializar Cliente
         const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
 
-        // UI
+        // Referencias UI
         const loader = document.getElementById('loading-section');
-        const form = document.getElementById('form-container');
+        const recoveryDiv = document.getElementById('recovery-container');
+        const verifiedDiv = document.getElementById('verified-container');
         const msg = document.getElementById('message');
 
-        // --- LÓGICA DE SESIÓN ---
-        async function handleSession() {
-            // 1. Verificar si Supabase detectó sesión automáticamente
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            if (session) {
-                showForm();
-                return;
-            }
+        // --- LÓGICA PRINCIPAL ---
+        supabaseClient.auth.onAuthStateChange(async (event, session) => {
+            console.log("Evento:", event);
 
-            // 2. Revisar URL
-            const hash = window.location.hash;
-            const code = new URLSearchParams(window.location.search).get('code');
-
-            // Si hay un hash con token, esperamos a que el listener de Supabase actúe
-            if (hash && hash.includes('access_token')) {
-                console.log("Token detectado, esperando procesamiento...");
-                return; 
-            }
-            
-            // Si hay un código PKCE (Backup, aunque ahora usamos método HTTP)
-            if (code) {
-                const { error } = await supabaseClient.auth.verifyOtp({ token_hash: code, type: 'recovery'});
-                if (!error) { showForm(); return; }
-            }
-
-            // Si llegamos aquí y no hay nada en 2 segundos, error.
-            setTimeout(() => {
-                if (form.classList.contains('hidden')) {
-                    showError("El enlace no es válido o ha expirado.");
-                }
-            }, 2500);
-        }
-
-        // Listener de eventos Auth
-        supabaseClient.auth.onAuthStateChange((event, session) => {
             if (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
-                showForm();
+                // Ya tenemos sesión, ahora decidimos qué mostrar según la URL
+                determineView();
+            } 
+            else if (event === 'USER_UPDATED') {
+                // Esto sucede justo después de verificar el email
+                showVerified();
             }
         });
 
-        // --- UI HELPERS ---
-        function showForm() {
-            loader.style.display = 'none';
-            form.style.display = 'block';
-            form.classList.remove('hidden');
+        // Función para decidir qué pantalla mostrar leyendo el hash de la URL
+        function determineView() {
+            const hash = window.location.hash;
+            
+            // Caso A: Recuperación de contraseña (type=recovery)
+            if (hash && hash.includes('type=recovery')) {
+                showRecovery();
+            } 
+            // Caso B: Verificación de registro (type=signup o type=invite)
+            // Ojo: A veces Supabase solo loguea al usuario sin params explícitos tras verificar.
+            // Asumimos que si está logueado y NO es recovery, es verificación exitosa.
+            else {
+                showVerified();
+            }
         }
 
-        function showError(text) {
+        function showRecovery() {
             loader.style.display = 'none';
-            msg.innerText = text;
-            msg.classList.remove('hidden');
-            msg.classList.add('text-red-500');
+            verifiedDiv.style.display = 'none';
+            recoveryDiv.style.display = 'block';
         }
 
-        // --- ACTUALIZAR PASSWORD ---
+        function showVerified() {
+            loader.style.display = 'none';
+            recoveryDiv.style.display = 'none';
+            verifiedDiv.style.display = 'block';
+        }
+
+        // --- LÓGICA DE CONTRASEÑA ---
         async function updatePassword() {
             const password = document.getElementById('password').value;
             const btn = document.getElementById('submitBtn');
 
             if (password.length < 6) {
-                alert("La contraseña debe tener al menos 6 caracteres");
-                return;
+                alert("Mínimo 6 caracteres"); return;
             }
 
             btn.disabled = true;
@@ -133,17 +131,14 @@
                 btn.disabled = false;
                 btn.innerText = "CAMBIAR CONTRASEÑA";
             } else {
-                msg.innerText = "¡Contraseña actualizada! Ya puedes volver a la App.";
+                msg.innerText = "¡Contraseña actualizada! Vuelve a la App.";
                 msg.classList.remove('text-red-500');
                 msg.classList.add('text-green-600');
                 msg.classList.remove('hidden');
-                form.style.display = 'none';
+                recoveryDiv.style.display = 'none';
                 await supabaseClient.auth.signOut();
             }
         }
-
-        // Arrancar
-        handleSession();
     </script>
 </body>
 </html>
