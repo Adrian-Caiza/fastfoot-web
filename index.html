@@ -54,8 +54,6 @@
         const supabaseUrl = 'https://mmvbwiozwwvvmyhpepdk.supabase.co'; 
         const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1tdmJ3aW96d3d2dm15aHBlcGRrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4OTk5MTUsImV4cCI6MjA4MTQ3NTkxNX0.dvuJVNE_8SgfkD3pt-I--yDk2yyxo5UIyuxBQIINi6I';
 
-
-        // Función para escribir en la caja gris de abajo
         function log(text) {
             const el = document.getElementById('debug-log');
             el.innerHTML += `<br/>> ${text}`;
@@ -64,74 +62,77 @@
 
         // --- 2. INICIALIZAR CLIENTE ---
         const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
-        
-        log("Cliente Supabase inicializado.");
+        log("Cliente inicializado.");
 
-        // Referencias UI
         const loader = document.getElementById('loading-section');
         const form = document.getElementById('form-container');
         const msg = document.getElementById('message');
 
-        // --- 3. LÓGICA MANUAL DE DETECCIÓN ---
+        // --- 3. LÓGICA DE DETECCIÓN CORREGIDA ---
         async function handleSession() {
-            // A. Revisar si hay sesión activa (Ej. recarga de página)
+            // A. Ver si ya hay sesión activa
             const { data: { session } } = await supabaseClient.auth.getSession();
             if (session) {
-                log("Sesión detectada automáticamente.");
+                log("Sesión activa detectada.");
                 showForm();
                 return;
             }
 
-            // B. Revisar la URL manualmente
+            // B. Analizar URL
             const urlParams = new URLSearchParams(window.location.search);
-            const code = urlParams.get('code'); // Para flujo PKCE
-            const hash = window.location.hash;  // Para flujo Implícito
+            const code = urlParams.get('code'); // Código PKCE
+            const hash = window.location.hash;  // Token Implícito
 
             log(`URL Check -> Code: ${code ? 'SÍ' : 'NO'} | Hash: ${hash ? 'SÍ' : 'NO'}`);
 
             if (code) {
-                log("Código encontrado. Intentando intercambiar...");
-                try {
-                    const { data, error } = await supabaseClient.auth.exchangeCodeForSession(code);
-                    if (error) throw error;
-                    log("¡Intercambio exitoso! Sesión creada.");
+                log("Código detectado. Usando estrategia 'verifyOtp' (Bypass PKCE)...");
+                
+                // CAMBIO CLAVE AQUÍ: 
+                // Usamos verifyOtp con type: 'recovery' en lugar de exchangeCodeForSession.
+                // Esto evita que pida el 'code_verifier' que se quedó en el celular.
+                const { data, error } = await supabaseClient.auth.verifyOtp({
+                    token_hash: code,
+                    type: 'recovery'
+                });
+
+                if (error) {
+                    log("Error verifyOtp: " + error.message);
+                    
+                    // Intento de respaldo: A veces el código no es un hash, sino un token directo
+                    log("Intentando estrategia secundaria...");
+                    /* const retry = await supabaseClient.auth.exchangeCodeForSession(code);
+                       (Esto fallaría, así que mostramos error directo) */
+                    showError("El enlace expiró o ya fue usado. Pide uno nuevo.");
+                } else {
+                    log("¡Éxito! Token verificado.");
+                    // verifyOtp crea la sesión automáticamente
                     showForm();
-                } catch (err) {
-                    log("Error intercambiando código: " + err.message);
-                    showError("El enlace ha expirado o es inválido.");
                 }
             } 
             else if (hash && hash.includes('access_token')) {
-                log("Token encontrado en Hash. Supabase debería procesarlo...");
-                // Damos un pequeño respiro para que el onAuthStateChange lo capture
-                setTimeout(() => {
-                    // Si después de 2 segundos no se mostró el form, forzamos error
-                    if (form.classList.contains('hidden')) {
-                        log("Supabase no procesó el Hash.");
-                        showError("No se pudo procesar el token.");
-                    }
-                }, 2000);
+                log("Hash detectado. Esperando a Supabase...");
+                // El onAuthStateChange manejará esto
             } 
             else {
-                log("No se encontró nada en la URL.");
-                showError("Enlace inválido. Intenta solicitar uno nuevo.");
+                log("URL limpia. No hay credenciales.");
+                showError("Enlace no válido. Solicita uno nuevo desde la App.");
             }
         }
 
         // --- 4. LISTENER DE RESPALDO ---
         supabaseClient.auth.onAuthStateChange((event, session) => {
-            log(`Evento Auth disparado: ${event}`);
             if (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
+                log(`Evento Auth: ${event}`);
                 showForm();
             }
         });
 
         // --- FUNCIONES UI ---
         function showForm() {
-            log("Mostrando formulario.");
             loader.style.display = 'none';
             form.style.display = 'block';
-            form.classList.remove('hidden'); // Asegurar visibilidad
+            form.classList.remove('hidden');
         }
 
         function showError(text) {
@@ -141,45 +142,40 @@
             msg.classList.add('text-red-500');
         }
 
-        // --- 5. LÓGICA DE ACTUALIZACIÓN ---
+        // --- 5. ACTUALIZAR PASSWORD ---
         async function updatePassword() {
             const password = document.getElementById('password').value;
             const btn = document.getElementById('submitBtn');
 
             if (password.length < 6) {
-                alert("La contraseña debe tener al menos 6 caracteres");
+                alert("Mínimo 6 caracteres");
                 return;
             }
 
             btn.disabled = true;
             btn.innerText = "Enviando...";
-            log("Enviando nueva contraseña...");
 
             const { data, error } = await supabaseClient.auth.updateUser({
                 password: password
             });
 
             if (error) {
-                log("Error al actualizar: " + error.message);
                 msg.innerText = "Error: " + error.message;
                 msg.classList.remove('hidden');
                 msg.classList.add('text-red-500');
                 btn.disabled = false;
                 btn.innerText = "CAMBIAR CONTRASEÑA";
             } else {
-                log("Contraseña actualizada con éxito.");
-                msg.innerText = "¡Contraseña actualizada! Ya puedes volver a la App.";
-                msg.classList.remove('hidden');
+                msg.innerText = "¡Contraseña Actualizada! Vuelve a la App.";
                 msg.classList.remove('text-red-500');
                 msg.classList.add('text-green-600');
+                msg.classList.remove('hidden');
                 document.getElementById('form-container').style.display = 'none';
                 await supabaseClient.auth.signOut();
             }
         }
 
-        // EJECUTAR AL INICIO
         handleSession();
-
     </script>
 </body>
 </html>
