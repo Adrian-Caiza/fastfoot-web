@@ -68,49 +68,56 @@
         const verifiedDiv = document.getElementById('verified-container');
         const msg = document.getElementById('message');
 
+        // Flag para evitar parpadeos
+        let isRecoveryMode = false;
+
         // --- LÓGICA PRINCIPAL ---
         supabaseClient.auth.onAuthStateChange(async (event, session) => {
-            console.log("Evento:", event);
+            console.log("Evento detectado:", event);
 
-            if (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
-                // Ya tenemos sesión, ahora decidimos qué mostrar según la URL
-                determineView();
+            // CASO 1: RECUPERACIÓN DE CONTRASEÑA (Prioridad Alta)
+            if (event === 'PASSWORD_RECOVERY') {
+                isRecoveryMode = true;
+                showRecovery();
             } 
+            
+            // CASO 2: SESIÓN INICIADA
+            else if (event === 'SIGNED_IN') {
+                // Si ya detectamos que es recovery, no hacemos nada (para que no cambie la pantalla)
+                if (isRecoveryMode) return;
+
+                // Verificamos la URL por si acaso el evento recovery no se disparó primero
+                if (window.location.href.includes('type=recovery')) {
+                    isRecoveryMode = true;
+                    showRecovery();
+                } else {
+                    // Si NO es recovery, entonces es una verificación de email o login normal
+                    showVerified();
+                }
+            } 
+            
+            // CASO 3: USUARIO ACTUALIZADO (Post-Verificación)
             else if (event === 'USER_UPDATED') {
-                // Esto sucede justo después de verificar el email
-                showVerified();
+                if (!isRecoveryMode) showVerified();
             }
         });
 
-        // Función para decidir qué pantalla mostrar leyendo el hash de la URL
-        function determineView() {
-            const hash = window.location.hash;
-            
-            // Caso A: Recuperación de contraseña (type=recovery)
-            if (hash && hash.includes('type=recovery')) {
-                showRecovery();
-            } 
-            // Caso B: Verificación de registro (type=signup o type=invite)
-            // Ojo: A veces Supabase solo loguea al usuario sin params explícitos tras verificar.
-            // Asumimos que si está logueado y NO es recovery, es verificación exitosa.
-            else {
-                showVerified();
-            }
-        }
-
+        // --- FUNCIONES DE VISTA ---
         function showRecovery() {
+            console.log("Mostrando pantalla: Recuperación");
             loader.style.display = 'none';
             verifiedDiv.style.display = 'none';
             recoveryDiv.style.display = 'block';
         }
 
         function showVerified() {
+            console.log("Mostrando pantalla: Verificado");
             loader.style.display = 'none';
             recoveryDiv.style.display = 'none';
             verifiedDiv.style.display = 'block';
         }
 
-        // --- LÓGICA DE CONTRASEÑA ---
+        // --- LÓGICA DE ACTUALIZACIÓN DE CONTRASEÑA ---
         async function updatePassword() {
             const password = document.getElementById('password').value;
             const btn = document.getElementById('submitBtn');
