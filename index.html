@@ -44,46 +44,68 @@
     
 
     <script>
-        // ---------------------------------------------------------
-        // 1. CONFIGURACIÓN (Asegúrate de pegar tus claves reales aquí)
-        // ---------------------------------------------------------
+        // 1. CONFIGURACIÓN
         const supabaseUrl = 'https://mmvbwiozwwvvmyhpepdk.supabase.co'; 
         const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1tdmJ3aW96d3d2dm15aHBlcGRrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4OTk5MTUsImV4cCI6MjA4MTQ3NTkxNX0.dvuJVNE_8SgfkD3pt-I--yDk2yyxo5UIyuxBQIINi6I';
 
-        // ---------------------------------------------------------
-        // 2. CORRECCIÓN DEL ERROR
-        // Usamos 'supabaseClient' en lugar de 'supabase' para no chocar 
-        // con el nombre de la librería global.
-        // ---------------------------------------------------------
+
+        // 2. CLIENTE "AUTOMÁTICO"
+        // Quitamos la restricción de 'implicit' para que detecte AUTOMÁTICAMENTE
+        // si el link trae un ?code= (PKCE) o un #access_token= (Implícito).
         const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey, {
             auth: {
-                flowType: 'implicit', 
                 detectSessionInUrl: true, 
             }
         });
 
-        // 3. Detectar si el usuario llegó con un token válido
-        // Nota: Ahora usamos 'supabaseClient' en lugar de 'supabase'
+        // Referencias al DOM
+        const loader = document.getElementById('loading-msg');
+        const form = document.getElementById('form-container');
+        const msg = document.getElementById('message');
+
+        // 3. ESCUCHA DE EVENTOS ROBUSTA
         supabaseClient.auth.onAuthStateChange(async (event, session) => {
-            const loader = document.getElementById('loading-msg');
-            const form = document.getElementById('form-container');
-            const msg = document.getElementById('message');
+            console.log("Evento Supabase:", event);
 
             if (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
+                // CASO 1: ÉXITO - Tenemos sesión (vía Token o Código intercambiado)
                 loader.style.display = 'none';
                 form.style.display = 'block'; 
-                console.log("Sesión recuperada correctamente");
-            } else if (event === 'SIGNED_OUT') {
-                if (!window.location.hash || !window.location.hash.includes('access_token')) {
+            } 
+            else if (event === 'INITIAL_SESSION') {
+                // CASO 2: CARGA INICIAL
+                // Si al cargar la página ya hay sesión, mostramos el formulario.
+                if (session) {
                     loader.style.display = 'none';
-                    msg.innerText = "Enlace inválido o expirado.";
+                    form.style.display = 'block';
+                } else {
+                    // Si NO hay sesión, verificamos si hay algo en la URL pendiente de procesar.
+                    // Si la URL está limpia, es que el enlace no sirvió o el usuario entró directo.
+                    const urlHasCode = window.location.search.includes('code=');
+                    const urlHasToken = window.location.hash.includes('access_token');
+                    
+                    if (!urlHasCode && !urlHasToken) {
+                        loader.style.display = 'none';
+                        msg.innerText = "Enlace no válido o expirado.";
+                        msg.classList.remove('hidden');
+                        msg.classList.add('text-red-500');
+                    }
+                    // Si hay code/token pero no hay sesión aún, esperamos (Supabase está procesando...)
+                }
+            }
+            else if (event === 'SIGNED_OUT') {
+                // CASO 3: CIERRE DE SESIÓN
+                // Solo mostramos error si el loader seguía activo
+                if (loader.style.display !== 'none') {
+                    loader.style.display = 'none';
+                    msg.innerText = "Sesión cerrada o enlace inválido.";
                     msg.classList.remove('hidden');
                     msg.classList.add('text-red-500');
                 }
             }
         });
 
-        // 4. Lógica para actualizar la contraseña
+        // 4. FUNCIÓN ACTUALIZAR (Sin cambios)
         async function updatePassword() {
             const password = document.getElementById('password').value;
             const btn = document.getElementById('submitBtn');
@@ -97,7 +119,6 @@
             btn.disabled = true;
             btn.innerText = "Actualizando...";
 
-            // Usamos supabaseClient aquí también
             const { data, error } = await supabaseClient.auth.updateUser({
                 password: password
             });
@@ -113,8 +134,6 @@
                 msg.innerText = "¡Contraseña actualizada! Ya puedes volver a la App.";
                 msg.classList.add('text-green-600');
                 document.getElementById('form-container').style.display = 'none';
-                
-                // Cerrar sesión por seguridad
                 await supabaseClient.auth.signOut();
             }
         }
