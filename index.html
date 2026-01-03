@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restablecer Contraseña - FastFoot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        .brand-color { color: #FF5722; }
+        .bg-brand { background-color: #FF5722; }
+        .btn-hover:hover { background-color: #E64A19; }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center h-screen">
+
+    <div class="bg-white p-8 rounded-lg shadow-lg max-w-md w-full text-center">
+        <div class="mb-6 flex justify-center">
+            <div class="rounded-full bg-orange-100 p-4">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 brand-color" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+            </div>
+        </div>
+
+        <h2 class="text-2xl font-bold mb-2 text-gray-800">Nueva Contraseña</h2>
+        <p class="text-gray-500 mb-6 text-sm">Ingresa tu nueva contraseña para recuperar el acceso a FastFoot.</p>
+
+        <div id="loading-msg" class="text-gray-500 mb-4">Verificando enlace...</div>
+
+        <div id="form-container" class="hidden">
+            <input type="password" id="password" placeholder="Nueva contraseña (min 6 caracteres)" 
+                    class="w-full p-3 border border-gray-300 rounded mb-4 focus:outline-none focus:border-orange-500 transition">
+            
+            <button onclick="updatePassword()" id="submitBtn"
+                    class="w-full bg-brand text-white p-3 rounded font-bold btn-hover transition duration-200">
+                CAMBIAR CONTRASEÑA
+            </button>
+        </div>
+
+        <p id="message" class="mt-4 text-sm font-semibold hidden"></p>
+    </div>
+
+    <script>
+        // ---------------------------------------------------------
+        // 1. CONFIGURACIÓN (Pegar claves del .env aquí)
+        // ---------------------------------------------------------
+        const supabaseUrl = 'https://mmvbwiozwwvvmyhpepdk.supabase.co'; 
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1tdmJ3aW96d3d2dm15aHBlcGRrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4OTk5MTUsImV4cCI6MjA4MTQ3NTkxNX0.dvuJVNE_8SgfkD3pt-I--yDk2yyxo5UIyuxBQIINi6I';
+
+
+        // 2. Inicialización forzando IMPLICIT FLOW
+        const supabase = supabase.createClient(supabaseUrl, supabaseKey, {
+            auth: {
+                flowType: 'implicit', // <--- ESTO ES VITAL para evitar PKCE
+                detectSessionInUrl: true, // Deja que Supabase lea el #access_token
+            }
+        });
+
+        // 3. Detectar si el usuario llegó con un token válido
+        supabase.auth.onAuthStateChange(async (event, session) => {
+            const loader = document.getElementById('loading-msg');
+            const form = document.getElementById('form-container');
+            const msg = document.getElementById('message');
+
+            if (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
+                // ¡Éxito! El token del URL era válido y ya tenemos sesión activa
+                loader.style.display = 'none';
+                form.style.display = 'block'; // Mostramos el formulario
+                console.log("Sesión recuperada vía Implicit Flow");
+            } else if (event === 'SIGNED_OUT') {
+                // Si no hay sesión y tampoco hay hash en la URL, es un error
+                if (!window.location.hash || !window.location.hash.includes('access_token')) {
+                    loader.style.display = 'none';
+                    msg.innerText = "Enlace inválido o expirado.";
+                    msg.classList.remove('hidden');
+                    msg.classList.add('text-red-500');
+                }
+            }
+        });
+
+        // 4. Lógica para actualizar la contraseña
+        async function updatePassword() {
+            const password = document.getElementById('password').value;
+            const btn = document.getElementById('submitBtn');
+            const msg = document.getElementById('message');
+
+            if (password.length < 6) {
+                alert("La contraseña debe tener al menos 6 caracteres");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerText = "Actualizando...";
+
+            // Como ya tenemos sesión activa (gracias al onAuthStateChange), 
+            // updateUser sabe a quién cambiarle la clave.
+            const { data, error } = await supabase.auth.updateUser({
+                password: password
+            });
+
+            msg.classList.remove('hidden');
+
+            if (error) {
+                msg.innerText = "Error: " + error.message;
+                msg.classList.add('text-red-500');
+                btn.disabled = false;
+                btn.innerText = "CAMBIAR CONTRASEÑA";
+            } else {
+                msg.innerText = "¡Contraseña actualizada! Ya puedes volver a la App.";
+                msg.classList.add('text-green-600');
+                document.getElementById('form-container').style.display = 'none';
+                
+                // Opcional: Cerrar sesión después de cambiar para seguridad
+                await supabase.auth.signOut();
+            }
+        }
+    </script>
+</body>
+</html>
