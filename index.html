@@ -24,7 +24,7 @@
         </div>
 
         <div id="loading-section">
-            <p class="text-gray-500 mb-6 text-sm">Procesando solicitud...</p>
+            <p class="text-gray-500 mb-6 text-sm">Analizando enlace...</p>
             <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto"></div>
         </div>
 
@@ -68,56 +68,86 @@
         const verifiedDiv = document.getElementById('verified-container');
         const msg = document.getElementById('message');
 
-        // Flag para evitar parpadeos
-        let isRecoveryMode = false;
+        // --- LÓGICA DE DETECCIÓN INTELIGENTE ---
+        
+        // 1. Función para leer parámetros de la URL (Hash o Query)
+        function getUrlParam(name) {
+            const urlStr = window.location.href; // Busca en toda la URL
+            name = name.replace(/[\[\]]/g, '\\$&');
+            const regex = new RegExp('[?&#]' + name + '(=([^&#]*)|&|#|$)');
+            const results = regex.exec(urlStr);
+            if (!results) return null;
+            if (!results[2]) return '';
+            return decodeURIComponent(results[2].replace(/\+/g, ' '));
+        }
 
-        // --- LÓGICA PRINCIPAL ---
-        supabaseClient.auth.onAuthStateChange(async (event, session) => {
-            console.log("Evento detectado:", event);
+        // 2. Determinar vista inicial basada en la URL (Antes de que Supabase cargue)
+        function handleInitialState() {
+            const type = getUrlParam('type'); // Supabase envía type=signup o type=recovery
+            const error = getUrlParam('error');
 
-            // CASO 1: RECUPERACIÓN DE CONTRASEÑA (Prioridad Alta)
-            if (event === 'PASSWORD_RECOVERY') {
-                isRecoveryMode = true;
+            console.log("Tipo detectado en URL:", type);
+
+            if (error) {
+                showError("Enlace inválido o expirado: " + getUrlParam('error_description'));
+                return;
+            }
+
+            // Si dice explícitamente recovery, mostramos recovery
+            if (type === 'recovery') {
                 showRecovery();
             } 
-            
-            // CASO 2: SESIÓN INICIADA
-            else if (event === 'SIGNED_IN') {
-                // Si ya detectamos que es recovery, no hacemos nada (para que no cambie la pantalla)
-                if (isRecoveryMode) return;
+            // Si dice signup o invite, mostramos verificado
+            else if (type === 'signup' || type === 'invite') {
+                showVerified();
+            }
+            // Si no hay tipo pero hay token, esperamos al listener de Supabase...
+        }
 
-                // Verificamos la URL por si acaso el evento recovery no se disparó primero
-                if (window.location.href.includes('type=recovery')) {
-                    isRecoveryMode = true;
+        // 3. Listener de Supabase (Para confirmar que la sesión se creó)
+        supabaseClient.auth.onAuthStateChange(async (event, session) => {
+            console.log("Evento Supabase:", event);
+
+            // Si Supabase nos dice que es recovery, le creemos ciegamente
+            if (event === 'PASSWORD_RECOVERY') {
+                showRecovery();
+            }
+            // Si iniciamos sesión (por token de email o login)
+            else if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+                // Volvemos a chequear la URL para desempatar
+                const type = getUrlParam('type');
+                
+                if (type === 'recovery') {
                     showRecovery();
                 } else {
-                    // Si NO es recovery, entonces es una verificación de email o login normal
+                    // Si iniciamos sesión y NO es recovery, asumimos éxito de verificación
+                    // (O si el usuario ya estaba logueado y refrescó la página)
                     showVerified();
                 }
-            } 
-            
-            // CASO 3: USUARIO ACTUALIZADO (Post-Verificación)
-            else if (event === 'USER_UPDATED') {
-                if (!isRecoveryMode) showVerified();
             }
         });
 
-        // --- FUNCIONES DE VISTA ---
+        // --- FUNCIONES VISUALES ---
         function showRecovery() {
-            console.log("Mostrando pantalla: Recuperación");
             loader.style.display = 'none';
             verifiedDiv.style.display = 'none';
             recoveryDiv.style.display = 'block';
         }
 
         function showVerified() {
-            console.log("Mostrando pantalla: Verificado");
             loader.style.display = 'none';
             recoveryDiv.style.display = 'none';
             verifiedDiv.style.display = 'block';
         }
 
-        // --- LÓGICA DE ACTUALIZACIÓN DE CONTRASEÑA ---
+        function showError(text) {
+            loader.style.display = 'none';
+            msg.innerText = text;
+            msg.classList.remove('hidden');
+            msg.classList.add('text-red-500');
+        }
+
+        // --- LÓGICA PASSWORD ---
         async function updatePassword() {
             const password = document.getElementById('password').value;
             const btn = document.getElementById('submitBtn');
@@ -125,7 +155,6 @@
             if (password.length < 6) {
                 alert("Mínimo 6 caracteres"); return;
             }
-
             btn.disabled = true;
             btn.innerText = "Guardando...";
 
@@ -146,6 +175,10 @@
                 await supabaseClient.auth.signOut();
             }
         }
+
+        // EJECUTAR CHECK INICIAL
+        handleInitialState();
+
     </script>
 </body>
 </html>
