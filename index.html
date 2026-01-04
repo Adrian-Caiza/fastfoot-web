@@ -18,13 +18,13 @@
         <div class="mb-6 flex justify-center">
             <div class="rounded-full bg-orange-100 p-4">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 brand-color" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                 </svg>
             </div>
         </div>
 
         <div id="loading-section">
-            <p class="text-gray-500 mb-6 text-sm">Analizando enlace...</p>
+            <p class="text-gray-500 mb-6 text-sm">Analizando solicitud...</p>
             <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto"></div>
         </div>
 
@@ -62,17 +62,18 @@
 
         const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
 
-        // Referencias UI
+        // UI Refs
         const loader = document.getElementById('loading-section');
         const recoveryDiv = document.getElementById('recovery-container');
         const verifiedDiv = document.getElementById('verified-container');
         const msg = document.getElementById('message');
 
-        // --- LÓGICA DE DETECCIÓN INTELIGENTE ---
-        
-        // 1. Función para leer parámetros de la URL (Hash o Query)
+        // VARIABLE DE BLOQUEO (MEMORIA)
+        let isRecoveryDetected = false;
+
+        // 1. Helper para leer URL
         function getUrlParam(name) {
-            const urlStr = window.location.href; // Busca en toda la URL
+            const urlStr = window.location.href;
             name = name.replace(/[\[\]]/g, '\\$&');
             const regex = new RegExp('[?&#]' + name + '(=([^&#]*)|&|#|$)');
             const results = regex.exec(urlStr);
@@ -81,47 +82,53 @@
             return decodeURIComponent(results[2].replace(/\+/g, ' '));
         }
 
-        // 2. Determinar vista inicial basada en la URL (Antes de que Supabase cargue)
-        function handleInitialState() {
-            const type = getUrlParam('type'); // Supabase envía type=signup o type=recovery
+        // 2. Chequeo Inicial (Antes de que Supabase limpie la URL)
+        function checkInitialUrl() {
+            const type = getUrlParam('type');
             const error = getUrlParam('error');
 
-            console.log("Tipo detectado en URL:", type);
-
             if (error) {
-                showError("Enlace inválido o expirado: " + getUrlParam('error_description'));
+                showError("Enlace inválido: " + getUrlParam('error_description'));
                 return;
             }
 
-            // Si dice explícitamente recovery, mostramos recovery
+            // Si detectamos recovery AHORA, activamos el bloqueo inmediatamente
             if (type === 'recovery') {
+                isRecoveryDetected = true;
                 showRecovery();
             } 
-            // Si dice signup o invite, mostramos verificado
             else if (type === 'signup' || type === 'invite') {
                 showVerified();
             }
-            // Si no hay tipo pero hay token, esperamos al listener de Supabase...
         }
 
-        // 3. Listener de Supabase (Para confirmar que la sesión se creó)
+        // 3. Listener de Eventos (Supabase)
         supabaseClient.auth.onAuthStateChange(async (event, session) => {
-            console.log("Evento Supabase:", event);
+            console.log("Evento:", event);
 
-            // Si Supabase nos dice que es recovery, le creemos ciegamente
+            // CASO A: Confirmación explícita de recuperación
             if (event === 'PASSWORD_RECOVERY') {
+                isRecoveryDetected = true;
                 showRecovery();
             }
-            // Si iniciamos sesión (por token de email o login)
+
+            // CASO B: Sesión iniciada (Login exitoso vía token)
             else if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-                // Volvemos a chequear la URL para desempatar
-                const type = getUrlParam('type');
                 
+                // IMPORTANTE: Si ya sabemos que es recovery, NO HACEMOS NADA.
+                // Esto evita que el "Verificado" sobrescriba la pantalla.
+                if (isRecoveryDetected) {
+                    console.log("Manteniendo pantalla Recovery (Bloqueo activo)");
+                    return;
+                }
+
+                // Revisamos la URL una vez más por si acaso
+                const type = getUrlParam('type');
                 if (type === 'recovery') {
+                    isRecoveryDetected = true;
                     showRecovery();
                 } else {
-                    // Si iniciamos sesión y NO es recovery, asumimos éxito de verificación
-                    // (O si el usuario ya estaba logueado y refrescó la página)
+                    // Solo si NO es recovery y NO detectamos recovery antes, asumimos verificado
                     showVerified();
                 }
             }
@@ -135,6 +142,9 @@
         }
 
         function showVerified() {
+            // Protección extra: Si el bloqueo está activo, no mostrar verificado
+            if (isRecoveryDetected) return;
+
             loader.style.display = 'none';
             recoveryDiv.style.display = 'none';
             verifiedDiv.style.display = 'block';
@@ -147,7 +157,7 @@
             msg.classList.add('text-red-500');
         }
 
-        // --- LÓGICA PASSWORD ---
+        // --- ACTUALIZAR PASSWORD ---
         async function updatePassword() {
             const password = document.getElementById('password').value;
             const btn = document.getElementById('submitBtn');
@@ -176,8 +186,8 @@
             }
         }
 
-        // EJECUTAR CHECK INICIAL
-        handleInitialState();
+        // EJECUTAR INMEDIATAMENTE
+        checkInitialUrl();
 
     </script>
 </body>
